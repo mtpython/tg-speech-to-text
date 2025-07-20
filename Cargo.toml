@@ -1,0 +1,27 @@
+[package]
+name = "telegram-stt-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+teloxide = { version = "0.12", features = ["macros"] }
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json", "multipart", "stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dotenvy = "0.15"
+log = "0.4"
+env_logger = "0.10"
+tempfile = "3.8"
+bytes = "1.5"
+uuid = { version = "1.6", features = ["v4"] }
+base64 = "0.21"
+thiserror = "1.0"
+warp = "0.3"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -1,0 +1,70 @@
+# Fly.io configuration for Telegram STT Bot
+app = "telegram-stt-bot"
+primary_region = "sjc"  # San Jose, CA - adjust as needed
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RUST_LOG = "info"
+  RUST_BACKTRACE = "1"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0  # Scale to zero when not in use
+  max_machines_running = 10
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+# Health check configuration
+[http_service.checks]
+  [http_service.checks.health]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+    type = "http"
+
+# Auto-scaling configuration
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+# Restart policy
+[restart]
+  policy = "on-failure"
+  max_restarts = 10
+
+# Secrets (set via fly secrets set)
+# TELEGRAM_BOT_TOKEN=""
+# STT_PROVIDER=""
+# OPENAI_API_KEY=""
+# ELEVENLABS_API_KEY=""
+# GOOGLE_CREDENTIALS_JSON=""
+
+# Process configuration
+[processes]
+  app = "./telegram-stt-bot"
+
+# Resource limits
+[mounts]
+  # No persistent storage needed for this bot
