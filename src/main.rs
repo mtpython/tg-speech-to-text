@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
         .branch(
             Update::filter_message()
                 .chain(dptree::filter(|msg: Message| {
-                    msg.voice().is_some() || msg.audio().is_some() || msg.video().is_some()
+                    msg.voice().is_some() || msg.audio().is_some() || msg.video().is_some() || msg.video_note().is_some()
                 }))
                 .endpoint(handlers::audio_handler),
         );
