@@ -1,7 +1,7 @@
 use super::SttError;
 use crate::audio::ConvertedAudio;
 use log::{debug, info};
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+use reqwest::multipart::{Form, Part};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -30,18 +30,24 @@ pub async fn transcribe(audio: &ConvertedAudio, api_key: &str) -> Result<String,
 
     let client = reqwest::Client::new();
     
-    // Prepare headers
-    let mut headers = HeaderMap::new();
-    headers.insert("xi-api-key", HeaderValue::from_str(api_key)
-        .map_err(|e| SttError::Api(format!("Invalid API key format: {}", e)))?);
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("audio/wav"));
+    // Create multipart form data
+    let audio_part = Part::bytes(audio.data.clone())
+        .file_name("audio.pcm")
+        .mime_str("audio/pcm")
+        .map_err(|e| SttError::Api(format!("Failed to create audio part: {}", e)))?;
+    
+    let form = Form::new()
+        .text("model_id", "scribe_v1_experimental")
+        .text("file_format", "pcm_s16le_16")
+        .text("timestamps_granularity", "none")
+        .part("file", audio_part);
 
-    debug!("Sending request to ElevenLabs STT API");
+    debug!("Sending multipart request to ElevenLabs STT API");
 
     let response = client
         .post("https://api.elevenlabs.io/v1/speech-to-text")
-        .headers(headers)
-        .body(audio.data.clone())
+        .header("xi-api-key", api_key)
+        .multipart(form)
         .send()
         .await?;
 
