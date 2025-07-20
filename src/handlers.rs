@@ -46,6 +46,7 @@ pub async fn command_handler(
             let welcome_text = "🎤 Welcome to the Speech-to-Text Bot!\n\n\
                 📝 Send me:\n\
                 • Voice messages\n\
+                • Video notes (round video messages)\n\
                 • Audio files (.mp3, .m4a, .ogg, etc.)\n\
                 • Video files (I'll extract the audio)\n\n\
                 I'll transcribe the speech and send you the text!";
@@ -100,7 +101,7 @@ pub async fn audio_handler(bot: Bot, msg: Message, config: BotConfig) -> Respons
             error!("Error processing audio: {}", e);
             let error_msg = match e {
                 BotError::Audio(audio::AudioError::UnsupportedFormat(_)) => {
-                    "❌ Unsupported audio format. Please send voice messages, audio files (.mp3, .m4a, .ogg), or video files."
+                    "❌ Unsupported audio format. Please send voice messages, video notes, audio files (.mp3, .m4a, .ogg), or video files."
                 }
                 BotError::Audio(audio::AudioError::ConversionFailed(_)) => {
                     "❌ Failed to process audio. The file might be corrupted or in an unsupported format."
@@ -139,6 +140,10 @@ async fn process_audio_message(bot: &Bot, msg: &Message, config: &BotConfig) -> 
                 teloxide::types::MediaKind::Video(video_msg) => {
                     info!("Processing video file: duration {}s", video_msg.video.duration);
                     (&video_msg.video.file, "video.mp4")
+                }
+                teloxide::types::MediaKind::VideoNote(video_note_msg) => {
+                    info!("Processing video note: duration {}s", video_note_msg.video_note.duration);
+                    (&video_note_msg.video_note.file, "video_note.mp4")
                 }
                 teloxide::types::MediaKind::Document(doc_msg) => {
                     info!("Processing document: {}", 
