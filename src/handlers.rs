@@ -8,6 +8,18 @@ use teloxide::{
 };
 use std::time::Instant;
 
+/// Escapes special characters for Telegram MarkdownV2 format
+fn escape_markdown_v2(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '_' | '*' | '[' | ']' | '(' | ')' | '~' | '`' | '>' | '#' | '+' | '-' | '=' | '|' | '{' | '}' | '.' | '!' => {
+                format!("\\{}", c)
+            }
+            _ => c.to_string(),
+        })
+        .collect()
+}
+
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
 pub enum Command {
@@ -74,9 +86,9 @@ pub async fn audio_handler(bot: Bot, msg: Message, config: BotConfig) -> Respons
             info!("Transcription completed in {:?}", duration);
             
             let response = if transcription.trim().is_empty() {
-                "🔇 No speech detected in the audio. The audio might be too quiet or contain no spoken words.".to_string()
+                "🔇 No speech detected in the audio\\. The audio might be too quiet or contain no spoken words\\.".to_string()
             } else {
-                format!("📝 **Transcription:**\n\n{}", transcription)
+                format!("📝 *Transcription:*\n\n{}", escape_markdown_v2(&transcription))
             };
             
             bot.send_message(msg.chat.id, response)
