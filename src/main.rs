@@ -36,6 +36,7 @@ pub struct BotConfig {
     pub elevenlabs_api_key: Option<String>,
     pub openai_api_key: Option<String>,
     pub google_credentials_json: Option<String>,
+    pub bot_password: Option<String>,
 }
 
 impl BotConfig {
@@ -54,6 +55,7 @@ impl BotConfig {
         let elevenlabs_api_key = env::var("ELEVENLABS_API_KEY").ok();
         let openai_api_key = env::var("OPENAI_API_KEY").ok();
         let google_credentials_json = env::var("GOOGLE_CREDENTIALS_JSON").ok();
+        let bot_password = env::var("BOT_PASSWORD").ok();
 
         // Validate that required API keys are present for selected provider
         match stt_provider {
@@ -75,6 +77,7 @@ impl BotConfig {
             elevenlabs_api_key,
             openai_api_key,
             google_credentials_json,
+            bot_password,
         })
     }
 }
@@ -109,6 +112,10 @@ async fn main() -> Result<()> {
                     msg.voice().is_some() || msg.audio().is_some() || msg.video().is_some() || msg.video_note().is_some()
                 }))
                 .endpoint(handlers::audio_handler),
+        )
+        .branch(
+            Update::filter_message()
+                .endpoint(handlers::text_handler),
         );
 
     info!("Bot started. Listening for messages...");

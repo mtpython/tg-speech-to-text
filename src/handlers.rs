@@ -31,12 +31,26 @@ pub enum Command {
     Start,
 }
 
+fn is_authorized(msg: &Message, config: &BotConfig) -> bool {
+    if let Some(password) = &config.bot_password {
+        if let Some(text) = msg.text() {
+            return text == password;
+        }
+        false
+    } else {
+        true
+    }
+}
+
 pub async fn command_handler(
     bot: Bot,
     msg: Message,
     cmd: Command,
     config: BotConfig,
 ) -> ResponseResult<()> {
+    if !is_authorized(&msg, &config) {
+        return Ok(());
+    }
     match cmd {
         Command::Help => {
             bot.send_message(msg.chat.id, Command::descriptions().to_string())
@@ -69,6 +83,10 @@ pub async fn command_handler(
 }
 
 pub async fn audio_handler(bot: Bot, msg: Message, config: BotConfig) -> ResponseResult<()> {
+    if !is_authorized(&msg, &config) {
+        return Ok(());
+    }
+    
     let start_time = Instant::now();
     
     // Send initial processing message
@@ -177,4 +195,12 @@ async fn process_audio_message(bot: &Bot, msg: &Message, config: &BotConfig) -> 
     let transcription = stt::transcribe(&converted_audio, config).await?;
     
     Ok(transcription)
+}
+
+pub async fn text_handler(bot: Bot, msg: Message, config: BotConfig) -> ResponseResult<()> {
+    if !is_authorized(&msg, &config) {
+        return Ok(());
+    }
+    
+    Ok(())
 }
