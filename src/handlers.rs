@@ -1,4 +1,4 @@
-use crate::{audio, stt, BotConfig, BotError, Result};
+use crate::{audio, stt, BotConfig, BotError, Result, AuthorizedUsers};
 use log::{error, info};
 use teloxide::{
     prelude::*,
@@ -31,15 +31,36 @@ pub enum Command {
     Start,
 }
 
-fn is_authorized(msg: &Message, config: &BotConfig) -> bool {
-    if let Some(password) = &config.bot_password {
-        if let Some(text) = msg.text() {
-            return text == password;
+async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &AuthorizedUsers) -> bool {
+    let user_id = match msg.from() {
+        Some(user) => user.id,
+        None => return false,
+    };
+    
+    // If no password is configured, allow all users
+    let Some(password) = &config.bot_password else {
+        return true;
+    };
+    
+    // Check if user is already authorized
+    {
+        let users = authorized_users.read().await;
+        if users.contains(&user_id) {
+            return true;
         }
-        false
-    } else {
-        true
     }
+    
+    // Check if current message is the password
+    if let Some(text) = msg.text() {
+        if text == password {
+            // Authorize the user
+            let mut users = authorized_users.write().await;
+            users.insert(user_id);
+            return true;
+        }
+    }
+    
+    false
 }
 
 pub async fn command_handler(
@@ -47,8 +68,9 @@ pub async fn command_handler(
     msg: Message,
     cmd: Command,
     config: BotConfig,
+    authorized_users: AuthorizedUsers,
 ) -> ResponseResult<()> {
-    if !is_authorized(&msg, &config) {
+    if !is_authorized(&msg, &config, &authorized_users).await {
         return Ok(());
     }
     match cmd {
@@ -82,8 +104,8 @@ pub async fn command_handler(
     Ok(())
 }
 
-pub async fn audio_handler(bot: Bot, msg: Message, config: BotConfig) -> ResponseResult<()> {
-    if !is_authorized(&msg, &config) {
+pub async fn audio_handler(bot: Bot, msg: Message, config: BotConfig, authorized_users: AuthorizedUsers) -> ResponseResult<()> {
+    if !is_authorized(&msg, &config, &authorized_users).await {
         return Ok(());
     }
     
@@ -197,8 +219,8 @@ async fn process_audio_message(bot: &Bot, msg: &Message, config: &BotConfig) -> 
     Ok(transcription)
 }
 
-pub async fn text_handler(bot: Bot, msg: Message, config: BotConfig) -> ResponseResult<()> {
-    if !is_authorized(&msg, &config) {
+pub async fn text_handler(bot: Bot, msg: Message, config: BotConfig, authorized_users: AuthorizedUsers) -> ResponseResult<()> {
+    if !is_authorized(&msg, &config, &authorized_users).await {
         return Ok(());
     }
     

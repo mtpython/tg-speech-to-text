@@ -5,6 +5,9 @@ mod audio;
 use dotenvy::dotenv;
 use log::{error, info};
 use std::env;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use std::collections::HashSet;
 use teloxide::{prelude::*, Bot};
 use thiserror::Error;
 use warp::Filter;
@@ -28,6 +31,8 @@ pub enum BotError {
 }
 
 pub type Result<T> = std::result::Result<T, BotError>;
+
+pub type AuthorizedUsers = Arc<RwLock<HashSet<UserId>>>;
 
 #[derive(Clone)]
 pub struct BotConfig {
@@ -99,6 +104,9 @@ async fn main() -> Result<()> {
     // Create bot instance
     let bot = Bot::new(&config.telegram_token);
 
+    // Create authorized users storage
+    let authorized_users: AuthorizedUsers = Arc::new(RwLock::new(HashSet::new()));
+
     // Set up dispatcher
     let handler = dptree::entry()
         .branch(
@@ -141,7 +149,7 @@ async fn main() -> Result<()> {
     info!("Health check server started on port 8080");
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![config])
+        .dependencies(dptree::deps![config, authorized_users])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
