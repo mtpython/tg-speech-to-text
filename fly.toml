@@ -1,70 +1,41 @@
-# Fly.io configuration for Telegram STT Bot
-app = "telegram-stt-bot"
-primary_region = "sjc"  # San Jose, CA - adjust as needed
+# fly.toml app configuration file generated for telegram-stt-bot on 2025-07-20T20:13:12+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'telegram-stt-bot'
+primary_region = 'fra'
+kill_signal = 'SIGINT'
+kill_timeout = '5s'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
+
+[deploy]
+  strategy = 'rolling'
 
 [env]
-  RUST_LOG = "info"
-  RUST_BACKTRACE = "1"
+  RUST_BACKTRACE = '1'
+  RUST_LOG = 'info'
+
+[processes]
+  app = ''
 
 [[services]]
-  protocol = "tcp"
+  protocol = 'tcp'
   internal_port = 8080
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0  # Scale to zero when not in use
-  max_machines_running = 10
+  min_machines_running = 0
+  ports = []
+  processes = ['app']
+
+  [services.concurrency]
+    type = 'requests'
+    hard_limit = 1000
+    soft_limit = 100
 
 [[vm]]
-  cpu_kind = "shared"
-  cpus = 1
-  memory_mb = 512
-
-# Health check configuration
-[http_service.checks]
-  [http_service.checks.health]
-    grace_period = "30s"
-    interval = "15s"
-    method = "GET"
-    path = "/health"
-    timeout = "5s"
-    type = "http"
-
-# Auto-scaling configuration
-[metrics]
-  port = 9091
-  path = "/metrics"
-
-# Restart policy
-[restart]
-  policy = "on-failure"
-  max_restarts = 10
-
-# Secrets (set via fly secrets set)
-# TELEGRAM_BOT_TOKEN=""
-# STT_PROVIDER=""
-# OPENAI_API_KEY=""
-# ELEVENLABS_API_KEY=""
-# GOOGLE_CREDENTIALS_JSON=""
-
-# Process configuration
-[processes]
-  app = "./telegram-stt-bot"
-
-# Resource limits
-[mounts]
-  # No persistent storage needed for this bot
+  size = 'shared-cpu-1x'
+  memory = '256mb'
+  processes = ['app']
