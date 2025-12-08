@@ -1,6 +1,6 @@
 # Multi-stage build for minimal final image
 # Stage 1: Build dependencies and tools
-FROM rust:1.91.1-slim as builder
+FROM rust:1.91.1-slim AS builder
 
 # Install system dependencies needed for building
 RUN apt-get update && apt-get install -y \
@@ -28,7 +28,7 @@ COPY src ./src
 RUN cargo build --release
 
 # Stage 2: Runtime preparation with ffmpeg
-FROM debian:bookworm-slim as runtime-prep
+FROM debian:bookworm-slim AS runtime-prep
 
 # Install ffmpeg and other runtime dependencies
 RUN apt-get update && apt-get install -y \
