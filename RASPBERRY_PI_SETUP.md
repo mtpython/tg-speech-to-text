@@ -24,8 +24,7 @@ sudo sh get-docker.sh
 # Add pi user to docker group
 sudo usermod -aG docker pi
 
-# Install Docker Compose
-sudo apt install -y docker-compose
+# Docker Compose is included with Docker
 
 # Reboot to apply group changes
 sudo reboot
@@ -34,7 +33,7 @@ sudo reboot
 After reboot, verify installation:
 ```bash
 docker --version
-docker-compose --version
+docker compose version
 ```
 
 ## 🚀 Step 2: Deploy the Bot
@@ -75,14 +74,14 @@ RUST_LOG=info
 
 ```bash
 # Build the Docker image (ARM64 optimized)
-docker-compose build
+docker compose build
 
 # Start the service
-docker-compose up -d
+docker compose up -d
 
 # Check status
-docker-compose ps
-docker-compose logs -f telegram-stt-bot
+docker compose ps
+docker compose logs -f telegram-stt-bot
 ```
 
 ## 📊 Step 3: Verify Installation
@@ -90,10 +89,10 @@ docker-compose logs -f telegram-stt-bot
 ### Check Service Status
 ```bash
 # Container status
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs telegram-stt-bot
+docker compose logs telegram-stt-bot
 
 # Health check
 curl http://localhost:8080/health
@@ -102,28 +101,28 @@ curl http://localhost:8080/health
 ### Test the Bot
 1. Send `/start` to your bot on Telegram
 2. Send a voice message or audio file
-3. Check logs: `docker-compose logs -f`
+3. Check logs: `docker compose logs -f`
 
 ## 🔧 Management Commands
 
 ### Daily Operations
 ```bash
 # View logs (live)
-docker-compose logs -f telegram-stt-bot
+docker compose logs -f telegram-stt-bot
 
 # Restart service
-docker-compose restart telegram-stt-bot
+docker compose restart telegram-stt-bot
 
 # Stop service
-docker-compose stop
+docker compose stop
 
 # Start service
-docker-compose start
+docker compose start
 
 # Update and restart
 git pull
-docker-compose build
-docker-compose up -d
+docker compose build
+docker compose up -d
 ```
 
 ### Resource Monitoring
@@ -155,8 +154,8 @@ Requires=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/home/pi/telegram-stt-bot
-ExecStart=/usr/bin/docker-compose up -d
-ExecStop=/usr/bin/docker-compose down
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
 User=pi
 
 [Install]
@@ -180,9 +179,9 @@ sudo systemctl start telegram-stt-bot
 uname -m  # Should show aarch64
 
 # Clean and rebuild
-docker-compose down
+docker compose down
 docker system prune -f
-docker-compose build --no-cache
+docker compose build --no-cache
 ```
 
 **2. Out of memory during build:**
@@ -198,10 +197,10 @@ sudo dphys-swapfile swapon
 **3. Bot not responding:**
 ```bash
 # Check logs
-docker-compose logs telegram-stt-bot
+docker compose logs telegram-stt-bot
 
 # Verify environment
-docker-compose exec telegram-stt-bot env | grep TELEGRAM
+docker compose exec telegram-stt-bot env | grep TELEGRAM
 
 # Test network
 curl -s https://api.telegram.org/bot<TOKEN>/getMe
@@ -210,22 +209,21 @@ curl -s https://api.telegram.org/bot<TOKEN>/getMe
 **4. Audio processing fails:**
 ```bash
 # Check FFmpeg in container
-docker-compose exec telegram-stt-bot ffmpeg -version
+docker compose exec telegram-stt-bot ffmpeg -version
 
 # Test STT API
-docker-compose logs | grep -i "stt\|error"
+docker compose logs | grep -i "stt\|error"
 ```
 
 ### Performance Optimization
 
-**Memory Limits (Pi 4 with 4GB RAM):**
-```yaml
-# In docker-compose.yml
-deploy:
-  resources:
-    limits:
-      memory: 512M
-      cpus: '2.0'
+**Docker System Monitoring:**
+```bash
+# Container resource usage
+docker stats telegram-stt-bot
+
+# System resources
+free -h && df -h
 ```
 
 **Storage Cleanup:**
@@ -247,7 +245,7 @@ sudo journalctl --vacuum-time=7d
 curl http://localhost:8080/health
 
 # Container health
-docker-compose ps telegram-stt-bot
+docker compose ps telegram-stt-bot
 ```
 
 ### Queue Statistics
@@ -272,8 +270,8 @@ cd /home/pi/telegram-stt-bot
 git pull
 
 # Rebuild and restart
-docker-compose build
-docker-compose up -d
+docker compose build
+docker compose up -d
 
 # Cleanup old images
 docker image prune -f
@@ -281,7 +279,7 @@ docker image prune -f
 
 ## 📧 Support
 
-- **Logs**: `docker-compose logs telegram-stt-bot`
+- **Logs**: `docker compose logs telegram-stt-bot`
 - **Health**: `curl http://localhost:8080/health`
 - **Queue Status**: Send `/queue` to bot
 - **System Status**: Send `/status` to bot

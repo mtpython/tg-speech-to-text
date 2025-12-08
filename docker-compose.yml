@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   telegram-stt-bot:
     build:
@@ -13,25 +11,16 @@ services:
       - RUST_LOG=${RUST_LOG:-info}
       - RUST_BACKTRACE=1
     ports:
-      - "8080:8080"  # Health check endpoint
+      - "8080:8080" # Health check endpoint
     volumes:
       # Optional: Mount logs directory for persistence
       - ./logs:/app/logs:rw
     healthcheck:
       test: ["CMD", "pgrep", "telegram-stt-bot"]
-      interval: 30s
+      interval: 600s
       timeout: 10s
       retries: 3
       start_period: 10s
-    # Resource limits for Raspberry Pi 4
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '2.0'
-        reservations:
-          memory: 128M
-          cpus: '0.5'
     # Security settings
     security_opt:
       - no-new-privileges:true
@@ -41,7 +30,7 @@ services:
       - CHOWN
       - SETGID
       - SETUID
-    read_only: false  # FFmpeg needs temp file access
+    read_only: false # FFmpeg needs temp file access
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
     networks:
