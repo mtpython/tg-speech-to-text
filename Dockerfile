@@ -1,6 +1,6 @@
 # Multi-stage build for minimal final image
 # Stage 1: Build dependencies and tools
-FROM rust:1.82-slim as builder
+FROM rust:1.91.1-slim as builder
 
 # Install system dependencies needed for building
 RUN apt-get update && apt-get install -y \
@@ -65,7 +65,7 @@ RUN chown -R app:app /app
 USER app
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=600s --timeout=3s --start-period=5s --retries=3 \
     CMD pgrep telegram-stt-bot || exit 1
 
 # Expose port (though Telegram bots don't need incoming connections)

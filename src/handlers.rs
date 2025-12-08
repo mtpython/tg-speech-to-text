@@ -1,5 +1,5 @@
-use crate::{audio, stt, BotConfig, BotError, Result, AuthorizedUsers};
-use log::{error, info};
+use crate::{audio, stt, BotConfig, BotError, Result, AuthorizedUsers, queue};
+use log::{error, info, warn};
 use teloxide::{
     prelude::*,
     types::MessageKind,
@@ -29,6 +29,8 @@ pub enum Command {
     Status,
     #[command(description = "Start the bot")]
     Start,
+    #[command(description = "Show queue status and statistics")]
+    Queue,
 }
 
 async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &AuthorizedUsers) -> bool {
@@ -69,6 +71,7 @@ pub async fn command_handler(
     cmd: Command,
     config: BotConfig,
     authorized_users: AuthorizedUsers,
+    queue_stats: queue::QueueStats,
 ) -> ResponseResult<()> {
     if !is_authorized(&msg, &config, &authorized_users).await {
         return Ok(());
@@ -97,61 +100,47 @@ pub async fn command_handler(
                 🚀 Ready to transcribe!",
                 config.stt_provider
             );
-            
+
             bot.send_message(msg.chat.id, status_text).await?;
+        }
+        Command::Queue => {
+            let queue_status = queue::get_queue_status(&queue_stats).await;
+            bot.send_message(msg.chat.id, queue_status)
+                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                .await?;
         }
     }
     Ok(())
 }
 
-pub async fn audio_handler(bot: Bot, msg: Message, config: BotConfig, authorized_users: AuthorizedUsers) -> ResponseResult<()> {
+pub async fn audio_handler(
+    bot: Bot,
+    msg: Message,
+    config: BotConfig,
+    authorized_users: AuthorizedUsers,
+    queue_sender: queue::QueueSender,
+    queue_stats: queue::QueueStats,
+) -> ResponseResult<()> {
     if !is_authorized(&msg, &config, &authorized_users).await {
         return Ok(());
     }
-    
-    let start_time = Instant::now();
-    
-    // Send initial processing message
-    let processing_msg = bot
-        .send_message(msg.chat.id, "🎵 Processing audio... This may take a moment.")
-        .await?;
 
-    let result = process_audio_message(&bot, &msg, &config).await;
-    
-    // Delete the processing message
-    bot.delete_message(msg.chat.id, processing_msg.id).await.ok();
-    
-    match result {
-        Ok(transcription) => {
-            let duration = start_time.elapsed();
-            info!("Transcription completed in {:?}", duration);
-            
-            let response = if transcription.trim().is_empty() {
-                "🔇 No speech detected in the audio\\. The audio might be too quiet or contain no spoken words\\.".to_string()
-            } else {
-                format!("📝 *Transcription:*\n\n{}", escape_markdown_v2(&transcription))
-            };
-            
-            bot.send_message(msg.chat.id, response)
-                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                .reply_to_message_id(msg.id)
-                .await?;
+    // Download and queue the audio file
+    let queue_result = download_and_queue_audio(&bot, &msg, &queue_sender, &queue_stats).await;
+
+    match queue_result {
+        Ok(queue_position) => {
+            info!("Audio file queued successfully at position {}", queue_position);
         }
         Err(e) => {
-            error!("Error processing audio: {}", e);
+            error!("Error queueing audio: {}", e);
             let error_msg = match e {
                 BotError::Audio(audio::AudioError::UnsupportedFormat(_)) => {
                     "❌ Unsupported audio format. Please send voice messages, video notes, audio files (.mp3, .m4a, .ogg), or video files."
                 }
-                BotError::Audio(audio::AudioError::ConversionFailed(_)) => {
-                    "❌ Failed to process audio. The file might be corrupted or in an unsupported format."
-                }
-                BotError::Stt(_) => {
-                    "❌ Speech-to-text service is temporarily unavailable. Please try again later."
-                }
                 _ => "❌ An error occurred while processing your audio. Please try again."
             };
-            
+
             bot.send_message(msg.chat.id, error_msg)
                 .reply_to_message_id(msg.id)
                 .await?;
@@ -161,7 +150,12 @@ pub async fn audio_handler(bot: Bot, msg: Message, config: BotConfig, authorized
     Ok(())
 }
 
-async fn process_audio_message(bot: &Bot, msg: &Message, config: &BotConfig) -> Result<String> {
+async fn download_and_queue_audio(
+    bot: &Bot,
+    msg: &Message,
+    queue_sender: &queue::QueueSender,
+    queue_stats: &queue::QueueStats,
+) -> Result<u64> {
     let (file_ref, original_filename) = match &msg.kind {
         MessageKind::Common(common) => {
             match &common.media_kind {
@@ -204,19 +198,66 @@ async fn process_audio_message(bot: &Bot, msg: &Message, config: &BotConfig) -> 
     // Download the file
     info!("Downloading file: {}", file_ref.id);
     let file = bot.get_file(&file_ref.id).await?;
-    
+
     let mut file_data = Vec::new();
     bot.download_file(&file.path, &mut file_data).await?;
-    
+
     info!("Downloaded {} bytes", file_data.len());
 
-    // Convert audio to the format required by the STT provider
-    let converted_audio = audio::convert_for_stt(&file_data, original_filename, config.stt_provider).await?;
-    
-    // Transcribe using the configured STT provider
-    let transcription = stt::transcribe(&converted_audio, config).await?;
-    
-    Ok(transcription)
+    // Get user info for logging
+    let user_info = msg.from()
+        .map(|user| {
+            if let Some(username) = &user.username {
+                format!("@{}", username)
+            } else {
+                format!("{} {}", user.first_name, user.last_name.as_deref().unwrap_or(""))
+            }
+        })
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    // Get current queue size for position calculation
+    let queue_position = {
+        let mut stats = queue_stats.write().await;
+        stats.increment_queued().await;
+        stats.current_queue_size
+    };
+
+    // Send initial queue message
+    let processing_msg = bot
+        .send_message(
+            msg.chat.id,
+            format!("📥 Added to queue (position: {})\nFile: {}", queue_position, original_filename)
+        )
+        .await?;
+
+    // Create queue item
+    let queue_item = queue::QueueItem::new(
+        bot.clone(),
+        msg.chat.id,
+        processing_msg.id,
+        msg.id,
+        file_data,
+        original_filename.to_string(),
+        user_info,
+    );
+
+    // Send to queue
+    if let Err(e) = queue_sender.send(queue_item) {
+        error!("Failed to send item to queue: {}", e);
+
+        // Decrement queue count since we failed to queue
+        {
+            let mut stats = queue_stats.write().await;
+            stats.current_queue_size = stats.current_queue_size.saturating_sub(1);
+        }
+
+        // Delete the processing message
+        bot.delete_message(msg.chat.id, processing_msg.id).await.ok();
+
+        return Err(BotError::Config("Queue is full or closed".to_string()));
+    }
+
+    Ok(queue_position)
 }
 
 pub async fn text_handler(bot: Bot, msg: Message, config: BotConfig, authorized_users: AuthorizedUsers) -> ResponseResult<()> {

@@ -1,12 +1,13 @@
 mod handlers;
 mod stt;
 mod audio;
+mod queue;
 
 use dotenvy::dotenv;
 use log::{error, info};
 use std::env;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 use std::collections::HashSet;
 use teloxide::{prelude::*, Bot};
 use thiserror::Error;
@@ -107,6 +108,17 @@ async fn main() -> Result<()> {
     // Create authorized users storage
     let authorized_users: AuthorizedUsers = Arc::new(RwLock::new(HashSet::new()));
 
+    // Create queue system
+    let (queue_sender, queue_receiver) = mpsc::unbounded_channel();
+    let queue_stats = Arc::new(RwLock::new(queue::QueueStatistics::default()));
+
+    // Start queue processor in background
+    let config_clone = config.clone();
+    let stats_clone = queue_stats.clone();
+    tokio::spawn(async move {
+        queue::start_queue_processor(queue_receiver, config_clone, stats_clone).await;
+    });
+
     // Set up dispatcher
     let handler = dptree::entry()
         .branch(
@@ -149,7 +161,7 @@ async fn main() -> Result<()> {
     info!("Health check server started on port 8080");
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![config, authorized_users])
+        .dependencies(dptree::deps![config, authorized_users, queue_sender, queue_stats])
         .enable_ctrlc_handler()
         .build()
         .dispatch()

@@ -1,4 +1,3 @@
-# flyctl launch added from .gitignore
+# Build artifacts and environment files
 target
 **/.env
-fly.toml

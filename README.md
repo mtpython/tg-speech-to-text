@@ -30,7 +30,7 @@ A high-performance Rust Telegram bot that transcribes voice messages, audio file
 
 ## 📋 Prerequisites
 
-- Rust 1.82+ (for development)
+- Rust 1.91.1+ (for development)
 - Docker (for deployment)
 - FFmpeg (included in Docker image)
 - Telegram Bot Token from [@BotFather](https://t.me/botfather)
