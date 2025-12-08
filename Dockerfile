@@ -27,8 +27,11 @@ COPY src ./src
 # Build the application with optimizations for static linking
 RUN cargo build --release
 
+# Also build debug version for troubleshooting
+RUN cargo build
+
 # Stage 2: Runtime preparation with ffmpeg
-FROM debian:bookworm-slim AS runtime-prep
+FROM rust:1.91.1-slim AS runtime-prep
 
 # Install ffmpeg and other runtime dependencies
 RUN apt-get update && apt-get install -y \
@@ -37,7 +40,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Stage 3: Final minimal image
-FROM debian:bookworm-slim
+FROM rust:1.91.1-slim
 
 # Install only essential runtime dependencies
 RUN apt-get update && apt-get install -y \
@@ -52,8 +55,11 @@ RUN useradd -r -u 1000 -m -d /app -s /bin/bash app
 # Set working directory
 WORKDIR /app
 
-# Copy the binary from builder stage
+# Copy the binaries from builder stage
 COPY --from=builder /app/target/release/telegram-stt-bot ./telegram-stt-bot
+COPY --from=builder /app/target/debug/telegram-stt-bot ./telegram-stt-bot-debug
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/Cargo.toml ./Cargo.toml
 
 # Make sure the binary is executable
 RUN chmod +x ./telegram-stt-bot
@@ -76,4 +82,4 @@ ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1
 
 # Run the application
-CMD ["./telegram-stt-bot"]
+CMD ["./telegram-stt-bot-debug"]
