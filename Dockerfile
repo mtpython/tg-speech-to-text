@@ -1,5 +1,4 @@
 # Multi-stage build for minimal final image
-# Stage 1: Build dependencies and tools
 FROM rust:1.91.1-slim AS builder
 
 # Install system dependencies needed for building
@@ -19,27 +18,15 @@ COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
 # Build dependencies (this layer will be cached)
-RUN cargo build --release && rm -rf src
+RUN cargo build && rm -rf src
 
 # Copy the actual source code
 COPY src ./src
 
-# Build the application with optimizations for static linking
+# Build the release application for production
 RUN cargo build --release
 
-# Also build debug version for troubleshooting
-RUN cargo build
-
-# Stage 2: Runtime preparation with ffmpeg
-FROM rust:1.91.1-slim AS runtime-prep
-
-# Install ffmpeg and other runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Stage 3: Final minimal image
+# Final runtime image
 FROM rust:1.91.1-slim
 
 # Install only essential runtime dependencies
@@ -55,11 +42,8 @@ RUN useradd -r -u 1000 -m -d /app -s /bin/bash app
 # Set working directory
 WORKDIR /app
 
-# Copy the binaries from builder stage
+# Copy the optimized release binary
 COPY --from=builder /app/target/release/telegram-stt-bot ./telegram-stt-bot
-COPY --from=builder /app/target/debug/telegram-stt-bot ./telegram-stt-bot-debug
-COPY --from=builder /app/src ./src
-COPY --from=builder /app/Cargo.toml ./Cargo.toml
 
 # Make sure the binary is executable
 RUN chmod +x ./telegram-stt-bot
@@ -70,11 +54,7 @@ RUN chown -R app:app /app
 # Switch to non-root user
 USER app
 
-# Health check
-HEALTHCHECK --interval=600s --timeout=3s --start-period=5s --retries=3 \
-    CMD pgrep telegram-stt-bot || exit 1
-
-# Expose port (though Telegram bots don't need incoming connections)
+# Expose port for health check endpoint
 EXPOSE 8080
 
 # Set environment variables for production
@@ -82,4 +62,4 @@ ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1
 
 # Run the application
-CMD ["./telegram-stt-bot-debug"]
+CMD ["./telegram-stt-bot"]

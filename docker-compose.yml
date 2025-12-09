@@ -18,7 +18,7 @@ services:
       # Mount data directory for persistence
       - ./data:/app/data:rw
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "telegram-stt-bot-debug"]
+      test: ["CMD", "pgrep", "-f", "telegram-stt-bot"]
       interval: 600s
       timeout: 10s
       retries: 3
