@@ -1,4 +1,4 @@
-use crate::{audio, stt, BotConfig, BotError, Result, AuthorizedUsers, queue};
+use crate::{audio, stt, BotConfig, BotError, Result, AuthorizedUsers, queue, persistence};
 use log::{error, info, warn};
 use teloxide::{
     prelude::*,
@@ -31,6 +31,8 @@ pub enum Command {
     Start,
     #[command(description = "Show queue status and statistics")]
     Queue,
+    #[command(description = "Show ElevenLabs credits usage")]
+    Credits,
 }
 
 async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &AuthorizedUsers) -> bool {
@@ -58,6 +60,12 @@ async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &Aut
             // Authorize the user
             let mut users = authorized_users.write().await;
             users.insert(user_id);
+
+            // Save to persistent storage
+            if let Err(e) = persistence::save_authorized_users(&users).await {
+                error!("Failed to save authorized users: {}", e);
+            }
+
             return true;
         }
     }
@@ -108,6 +116,33 @@ pub async fn command_handler(
             bot.send_message(msg.chat.id, queue_status)
                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                 .await?;
+        }
+        Command::Credits => {
+            match &config.elevenlabs_api_key {
+                Some(api_key) => {
+                    match stt::elevenlabs::get_user_credits(api_key).await {
+                        Ok(user_info) => {
+                            let credits_text = format!(
+                                "💳 ElevenLabs Credits\n\
+                                Used: {} characters\n\
+                                Limit: {} characters\n\
+                                Remaining: {} characters",
+                                user_info.subscription.character_count,
+                                user_info.subscription.character_limit,
+                                user_info.subscription.character_limit.saturating_sub(user_info.subscription.character_count)
+                            );
+                            bot.send_message(msg.chat.id, credits_text).await?;
+                        }
+                        Err(e) => {
+                            let error_msg = format!("❌ Failed to get credits: {}", e);
+                            bot.send_message(msg.chat.id, error_msg).await?;
+                        }
+                    }
+                }
+                None => {
+                    bot.send_message(msg.chat.id, "❌ ElevenLabs API key not configured").await?;
+                }
+            }
         }
     }
     Ok(())
@@ -215,6 +250,11 @@ async fn download_and_queue_audio(
         })
         .unwrap_or_else(|| "Unknown".to_string());
 
+    // Extract user ID and username for detailed logging
+    let (user_id, username) = msg.from()
+        .map(|user| (user.id, user.username.clone()))
+        .unwrap_or_else(|| (teloxide::types::UserId(0), None));
+
     // Get current queue size for position calculation
     let queue_position = {
         let mut stats = queue_stats.write().await;
@@ -239,6 +279,8 @@ async fn download_and_queue_audio(
         file_data,
         original_filename.to_string(),
         user_info,
+        user_id,
+        username,
     );
 
     // Send to queue

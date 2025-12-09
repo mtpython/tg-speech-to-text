@@ -18,6 +18,7 @@ uuid = { version = "1.6", features = ["v4"] }
 base64 = "0.21"
 thiserror = "1.0"
 warp = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
 
 [profile.release]
 strip = true

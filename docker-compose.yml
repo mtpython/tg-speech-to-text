@@ -15,6 +15,8 @@ services:
     volumes:
       # Optional: Mount logs directory for persistence
       - ./logs:/app/logs:rw
+      # Mount data directory for persistence
+      - ./data:/app/data:rw
     healthcheck:
       test: ["CMD", "pgrep", "-f", "telegram-stt-bot-debug"]
       interval: 600s

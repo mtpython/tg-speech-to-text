@@ -17,6 +17,17 @@ struct ElevenLabsErrorResponse {
     message: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct ElevenLabsSubscription {
+    pub character_count: u64,
+    pub character_limit: u64,
+}
+
+#[derive(Deserialize)]
+pub struct ElevenLabsUser {
+    pub subscription: ElevenLabsSubscription,
+}
+
 pub async fn transcribe(audio: &ConvertedAudio, api_key: &str) -> Result<String, SttError> {
     info!("Starting ElevenLabs transcription for {} bytes of {} audio", 
         audio.data.len(), audio.format);
@@ -83,6 +94,53 @@ pub async fn transcribe(audio: &ConvertedAudio, api_key: &str) -> Result<String,
             }
         }
         
+        // Fallback to raw error text
+        Err(SttError::Api(format!("HTTP {}: {}", status, error_text)))
+    }
+}
+
+pub async fn get_user_credits(api_key: &str) -> Result<ElevenLabsUser, SttError> {
+    info!("Getting ElevenLabs user credits");
+
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get("https://api.elevenlabs.io/v1/user")
+        .header("xi-api-key", api_key)
+        .send()
+        .await?;
+
+    let status = response.status();
+    debug!("ElevenLabs user API response status: {}", status);
+
+    if status.is_success() {
+        let response_text = response.text().await?;
+
+        let user_response = serde_json::from_str::<ElevenLabsUser>(&response_text)
+            .map_err(|e| SttError::Api(format!("Failed to parse user response: {}", e)))?;
+
+        info!("ElevenLabs credits retrieved: {}/{}",
+            user_response.subscription.character_count,
+            user_response.subscription.character_limit);
+
+        Ok(user_response)
+    } else {
+        let error_text = response.text().await?;
+
+        // Try to parse as JSON error
+        if let Ok(error_response) = serde_json::from_str::<ElevenLabsErrorResponse>(&error_text) {
+            let error_message = error_response.detail
+                .or(error_response.message)
+                .unwrap_or_else(|| "Unknown error".to_string());
+
+            match status.as_u16() {
+                401 => return Err(SttError::Authentication),
+                429 => return Err(SttError::RateLimit),
+                503 => return Err(SttError::ServiceUnavailable),
+                _ => return Err(SttError::Api(error_message)),
+            }
+        }
+
         // Fallback to raw error text
         Err(SttError::Api(format!("HTTP {}: {}", status, error_text)))
     }

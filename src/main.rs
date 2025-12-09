@@ -2,6 +2,8 @@ mod handlers;
 mod stt;
 mod audio;
 mod queue;
+mod persistence;
+mod request_logger;
 
 use dotenvy::dotenv;
 use log::{error, info};
@@ -105,8 +107,9 @@ async fn main() -> Result<()> {
     // Create bot instance
     let bot = Bot::new(&config.telegram_token);
 
-    // Create authorized users storage
-    let authorized_users: AuthorizedUsers = Arc::new(RwLock::new(HashSet::new()));
+    // Load authorized users from persistent storage
+    let initial_users = persistence::load_authorized_users().await?;
+    let authorized_users: AuthorizedUsers = Arc::new(RwLock::new(initial_users));
 
     // Create queue system
     let (queue_sender, queue_receiver) = mpsc::unbounded_channel();

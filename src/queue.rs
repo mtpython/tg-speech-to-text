@@ -1,4 +1,4 @@
-use crate::{BotConfig, Result, BotError};
+use crate::{BotConfig, Result, BotError, request_logger, stt::SttProvider};
 use log::{info, error, warn};
 use std::sync::Arc;
 use teloxide::{prelude::*, types::MessageId};
@@ -15,6 +15,8 @@ pub struct QueueItem {
     pub file_data: Vec<u8>,
     pub original_filename: String,
     pub user_info: String,
+    pub user_id: teloxide::types::UserId,
+    pub username: Option<String>,
 }
 
 impl QueueItem {
@@ -26,6 +28,8 @@ impl QueueItem {
         file_data: Vec<u8>,
         original_filename: String,
         user_info: String,
+        user_id: teloxide::types::UserId,
+        username: Option<String>,
     ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -36,6 +40,8 @@ impl QueueItem {
             file_data,
             original_filename,
             user_info,
+            user_id,
+            username,
         }
     }
 }
@@ -177,6 +183,17 @@ pub async fn start_queue_processor(
 
 async fn process_audio_item(item: &QueueItem, config: &BotConfig) -> Result<String> {
     use crate::{audio, stt};
+
+    // Log transcription request for ElevenLabs
+    if matches!(config.stt_provider, SttProvider::ElevenLabs) {
+        if let Err(e) = request_logger::log_transcription_request(
+            item.user_id,
+            item.username.as_deref(),
+            item.file_data.len(),
+        ).await {
+            error!("Failed to log transcription request: {}", e);
+        }
+    }
 
     // Convert audio to the format required by the STT provider
     let converted_audio = audio::convert_for_stt(&item.file_data, &item.original_filename, config.stt_provider).await?;
