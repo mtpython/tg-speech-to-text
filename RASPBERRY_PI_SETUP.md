@@ -95,7 +95,7 @@ docker compose ps
 docker compose logs telegram-stt-bot
 
 # Health check
-curl http://localhost:8080/health
+curl http://localhost:8091/health
 ```
 
 ### Test the Bot
@@ -242,7 +242,7 @@ sudo journalctl --vacuum-time=7d
 ### Health Checks
 ```bash
 # HTTP health endpoint
-curl http://localhost:8080/health
+curl http://localhost:8091/health
 
 # Container health
 docker compose ps telegram-stt-bot
@@ -280,7 +280,7 @@ docker image prune -f
 ## 📧 Support
 
 - **Logs**: `docker compose logs telegram-stt-bot`
-- **Health**: `curl http://localhost:8080/health`
+- **Health**: `curl http://localhost:8091/health`
 - **Queue Status**: Send `/queue` to bot
 - **System Status**: Send `/status` to bot
 

@@ -11,12 +11,13 @@ services:
       - RUST_LOG=${RUST_LOG:-info}
       - RUST_BACKTRACE=1
     ports:
-      - "8080:8080" # Health check endpoint
+      - "8091:8091" # Health check endpoint
     volumes:
       # Optional: Mount logs directory for persistence
       - ./logs:/app/logs:rw
       # Mount data directory for persistence
       - ./data:/app/data:rw
+    user: "1000:1000"
     healthcheck:
       test: ["CMD", "pgrep", "-f", "telegram-stt-bot"]
       interval: 600s

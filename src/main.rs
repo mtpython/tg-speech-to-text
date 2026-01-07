@@ -157,11 +157,11 @@ async fn main() -> Result<()> {
     // Start health check server in background
     tokio::spawn(async move {
         warp::serve(routes)
-            .run(([0, 0, 0, 0], 8080))
+            .run(([0, 0, 0, 0], 8091))
             .await;
     });
 
-    info!("Health check server started on port 8080");
+    info!("Health check server started on port 8091");
 
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![config, authorized_users, queue_sender, queue_stats])

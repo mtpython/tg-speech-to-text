@@ -48,14 +48,16 @@ COPY --from=builder /app/target/release/telegram-stt-bot ./telegram-stt-bot
 # Make sure the binary is executable
 RUN chmod +x ./telegram-stt-bot
 
-# Change ownership to app user
-RUN chown -R app:app /app
+# Create directories for mounted volumes with proper permissions
+RUN mkdir -p /app/data /app/logs && \
+    chown -R app:app /app && \
+    chmod 755 /app/data /app/logs
 
 # Switch to non-root user
 USER app
 
 # Expose port for health check endpoint
-EXPOSE 8080
+EXPOSE 8091
 
 # Set environment variables for production
 ENV RUST_LOG=info
