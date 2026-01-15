@@ -130,12 +130,7 @@ pub async fn start_queue_processor(
                     format!("📝 *Transcription:*\n\n{}", escape_markdown_v2(&transcription))
                 };
 
-                if let Err(e) = item.bot
-                    .send_message(item.chat_id, response)
-                    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                    .reply_to_message_id(item.reply_to_message_id)
-                    .await
-                {
+                if let Err(e) = send_long_message(&item.bot, item.chat_id, &response, item.reply_to_message_id).await {
                     error!("Failed to send transcription for item {}: {}", item.id, e);
                 }
 
@@ -213,6 +208,80 @@ fn escape_markdown_v2(text: &str) -> String {
             _ => c.to_string(),
         })
         .collect()
+}
+
+async fn send_long_message(bot: &Bot, chat_id: ChatId, text: &str, reply_to: MessageId) -> Result<()> {
+    const MAX_LENGTH: usize = 4000; // Leave some buffer below 4096 limit
+
+    if text.len() <= MAX_LENGTH {
+        bot.send_message(chat_id, text)
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+            .reply_to_message_id(reply_to)
+            .await?;
+        return Ok(());
+    }
+
+    // Split the message into chunks
+    let mut chunks = Vec::new();
+    let mut current_chunk = String::new();
+
+    // Split by lines first to avoid breaking mid-sentence
+    for line in text.lines() {
+        if current_chunk.len() + line.len() + 1 > MAX_LENGTH {
+            if !current_chunk.is_empty() {
+                chunks.push(current_chunk.clone());
+                current_chunk.clear();
+            }
+
+            // If a single line is too long, split it by words
+            if line.len() > MAX_LENGTH {
+                for word in line.split_whitespace() {
+                    if current_chunk.len() + word.len() + 1 > MAX_LENGTH {
+                        if !current_chunk.is_empty() {
+                            chunks.push(current_chunk.clone());
+                            current_chunk.clear();
+                        }
+                    }
+                    if !current_chunk.is_empty() {
+                        current_chunk.push(' ');
+                    }
+                    current_chunk.push_str(word);
+                }
+            } else {
+                current_chunk = line.to_string();
+            }
+        } else {
+            if !current_chunk.is_empty() {
+                current_chunk.push('\n');
+            }
+            current_chunk.push_str(line);
+        }
+    }
+
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    // Send each chunk
+    for (i, chunk) in chunks.iter().enumerate() {
+        let message_text = if chunks.len() > 1 {
+            format!("{}\n\n*\\(Part {} of {}\\)*", chunk, i + 1, chunks.len())
+        } else {
+            chunk.clone()
+        };
+
+        let mut request = bot.send_message(chat_id, message_text)
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2);
+
+        // Only reply to original message for the first chunk
+        if i == 0 {
+            request = request.reply_to_message_id(reply_to);
+        }
+
+        request.await?;
+    }
+
+    Ok(())
 }
 
 pub async fn get_queue_status(stats: &QueueStats) -> String {
