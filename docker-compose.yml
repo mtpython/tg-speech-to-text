@@ -18,6 +18,10 @@ services:
       # Mount data directory for persistence
       - ./data:/app/data:rw
     user: "1000:1000"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
     healthcheck:
       test: ["CMD", "pgrep", "-f", "telegram-stt-bot"]
       interval: 600s
