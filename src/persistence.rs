@@ -3,7 +3,7 @@ use std::path::Path;
 use log::{info, warn, error};
 use serde::{Deserialize, Serialize};
 use teloxide::types::UserId;
-use crate::{BotError, Result};
+use crate::{BotError, Result, stt::SttProvider};
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct AuthorizedUsersData {
@@ -11,6 +11,7 @@ pub struct AuthorizedUsersData {
 }
 
 const USERS_FILE: &str = "data/authorized_users.json";
+const RUNTIME_CONFIG_FILE: &str = "data/runtime_config.json";
 
 impl AuthorizedUsersData {
     pub fn from_user_ids(user_ids: &HashSet<UserId>) -> Self {
@@ -85,6 +86,73 @@ pub async fn save_authorized_users(user_ids: &HashSet<UserId>) -> Result<()> {
         }
         Err(e) => {
             error!("Failed to serialize authorized users: {}", e);
+            Err(BotError::Config(format!("JSON serialization error: {}", e)))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct RuntimeConfigData {
+    stt_provider: String,
+}
+
+pub async fn load_runtime_config() -> Result<Option<SttProvider>> {
+    if !Path::new(RUNTIME_CONFIG_FILE).exists() {
+        return Ok(None);
+    }
+
+    match tokio::fs::read_to_string(RUNTIME_CONFIG_FILE).await {
+        Ok(contents) => {
+            match serde_json::from_str::<RuntimeConfigData>(&contents) {
+                Ok(data) => {
+                    match SttProvider::from_str(&data.stt_provider) {
+                        Some(provider) => {
+                            info!("Loaded runtime config: provider={}", data.stt_provider);
+                            Ok(Some(provider))
+                        }
+                        None => {
+                            warn!("Unknown provider '{}' in runtime config, ignoring", data.stt_provider);
+                            Ok(None)
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to parse runtime config: {}, ignoring", e);
+                    Ok(None)
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to read runtime config: {}, ignoring", e);
+            Ok(None)
+        }
+    }
+}
+
+pub async fn save_runtime_config(provider: SttProvider) -> Result<()> {
+    if let Some(parent) = Path::new(RUNTIME_CONFIG_FILE).parent() {
+        if !parent.exists() {
+            tokio::fs::create_dir_all(parent).await.map_err(BotError::Io)?;
+        }
+    }
+
+    let data = RuntimeConfigData {
+        stt_provider: provider.as_str().to_string(),
+    };
+
+    match serde_json::to_string_pretty(&data) {
+        Ok(json_content) => {
+            tokio::fs::write(RUNTIME_CONFIG_FILE, json_content)
+                .await
+                .map_err(|e| {
+                    error!("Failed to write runtime config: {}", e);
+                    BotError::Io(e)
+                })?;
+            info!("Saved runtime config: provider={}", provider.as_str());
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to serialize runtime config: {}", e);
             Err(BotError::Config(format!("JSON serialization error: {}", e)))
         }
     }

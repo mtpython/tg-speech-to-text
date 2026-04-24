@@ -1,6 +1,7 @@
 pub mod elevenlabs;
 pub mod whisper;
 pub mod google;
+pub mod deepgram;
 
 use crate::{audio::ConvertedAudio, BotConfig};
 use thiserror::Error;
@@ -21,15 +22,50 @@ pub enum SttError {
     ServiceUnavailable,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SttProvider {
     Whisper,
     ElevenLabs,
     Google,
+    Deepgram,
 }
 
-pub async fn transcribe(audio: &ConvertedAudio, config: &BotConfig) -> Result<String, SttError> {
-    match config.stt_provider {
+impl SttProvider {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "whisper" => Some(Self::Whisper),
+            "elevenlabs" => Some(Self::ElevenLabs),
+            "google" => Some(Self::Google),
+            "deepgram" => Some(Self::Deepgram),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Whisper => "whisper",
+            Self::ElevenLabs => "elevenlabs",
+            Self::Google => "google",
+            Self::Deepgram => "deepgram",
+        }
+    }
+
+    pub fn model(&self) -> &'static str {
+        match self {
+            Self::Whisper => "whisper-1",
+            Self::ElevenLabs => "scribe_v1_experimental",
+            Self::Google => "default",
+            Self::Deepgram => "nova-3",
+        }
+    }
+}
+
+pub async fn transcribe(
+    audio: &ConvertedAudio,
+    provider: SttProvider,
+    config: &BotConfig,
+) -> Result<String, SttError> {
+    match provider {
         SttProvider::Whisper => {
             let api_key = config.openai_api_key.as_ref()
                 .ok_or_else(|| SttError::Api("OpenAI API key not configured".to_string()))?;
@@ -44,6 +80,11 @@ pub async fn transcribe(audio: &ConvertedAudio, config: &BotConfig) -> Result<St
             let credentials = config.google_credentials_json.as_ref()
                 .ok_or_else(|| SttError::Api("Google credentials not configured".to_string()))?;
             google::transcribe(audio, credentials).await
+        }
+        SttProvider::Deepgram => {
+            let api_key = config.deepgram_api_key.as_ref()
+                .ok_or_else(|| SttError::Api("Deepgram API key not configured".to_string()))?;
+            deepgram::transcribe(audio, api_key).await
         }
     }
 }

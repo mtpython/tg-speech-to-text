@@ -30,8 +30,11 @@ struct WhisperErrorDetails {
 }
 
 pub async fn transcribe(audio: &ConvertedAudio, api_key: &str) -> Result<String, SttError> {
-    info!("Starting Whisper transcription for {} bytes of {} audio", 
-        audio.data.len(), audio.format);
+    info!(
+        "Starting transcription provider=whisper model=whisper-1 bytes={} format={}",
+        audio.data.len(),
+        audio.format
+    );
 
     let client = reqwest::Client::new();
     
@@ -70,7 +73,10 @@ pub async fn transcribe(audio: &ConvertedAudio, api_key: &str) -> Result<String,
 
     if status.is_success() {
         let transcription = response.text().await?;
-        info!("Whisper transcription successful: {} characters", transcription.len());
+        info!(
+            "Transcription complete provider=whisper model=whisper-1 chars={}",
+            transcription.len()
+        );
         Ok(transcription.trim().to_string())
     } else {
         let error_text = response.text().await?;

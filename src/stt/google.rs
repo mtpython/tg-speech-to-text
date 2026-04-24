@@ -73,8 +73,11 @@ struct GoogleCredentials {
 }
 
 pub async fn transcribe(audio: &ConvertedAudio, credentials_json: &str) -> Result<String, SttError> {
-    info!("Starting Google Cloud STT transcription for {} bytes of {} audio", 
-        audio.data.len(), audio.format);
+    info!(
+        "Starting transcription provider=google model=default bytes={} format={}",
+        audio.data.len(),
+        audio.format
+    );
 
     // Parse credentials
     let credentials: GoogleCredentials = serde_json::from_str(credentials_json)
@@ -135,7 +138,10 @@ pub async fn transcribe(audio: &ConvertedAudio, credentials_json: &str) -> Resul
             .map(|alt| alt.transcript)
             .unwrap_or_default();
 
-        info!("Google STT transcription successful: {} characters", transcription.len());
+        info!(
+            "Transcription complete provider=google model=default chars={}",
+            transcription.len()
+        );
         Ok(transcription.trim().to_string())
     } else {
         let error_text = response.text().await?;

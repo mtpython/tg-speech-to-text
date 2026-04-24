@@ -1,24 +1,11 @@
-use crate::{audio, stt, BotConfig, BotError, Result, AuthorizedUsers, queue, persistence};
-use log::{error, info, warn};
+use crate::{audio, stt, BotConfig, BotError, Result, AuthorizedUsers, CurrentProvider, queue, persistence};
+use log::{error, info};
 use teloxide::{
     prelude::*,
     types::MessageKind,
     utils::command::BotCommands,
     net::Download,
 };
-use std::time::Instant;
-
-/// Escapes special characters for Telegram MarkdownV2 format
-fn escape_markdown_v2(text: &str) -> String {
-    text.chars()
-        .map(|c| match c {
-            '_' | '*' | '[' | ']' | '(' | ')' | '~' | '`' | '>' | '#' | '+' | '-' | '=' | '|' | '{' | '}' | '.' | '!' => {
-                format!("\\{}", c)
-            }
-            _ => c.to_string(),
-        })
-        .collect()
-}
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
@@ -31,8 +18,12 @@ pub enum Command {
     Start,
     #[command(description = "Show queue status and statistics")]
     Queue,
-    #[command(description = "Show ElevenLabs credits usage")]
-    Credits,
+    #[command(description = "Show credits for a provider: /credits [deepgram|elevenlabs]")]
+    Credits(String),
+    #[command(description = "Show current STT provider")]
+    Provider,
+    #[command(description = "Switch STT provider (admin only): /setprovider <whisper|elevenlabs|google|deepgram>")]
+    SetProvider(String),
 }
 
 async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &AuthorizedUsers) -> bool {
@@ -40,12 +31,12 @@ async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &Aut
         Some(user) => user.id,
         None => return false,
     };
-    
+
     // If no password is configured, allow all users
     let Some(password) = &config.bot_password else {
         return true;
     };
-    
+
     // Check if user is already authorized
     {
         let users = authorized_users.read().await;
@@ -53,7 +44,7 @@ async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &Aut
             return true;
         }
     }
-    
+
     // Check if current message is the password
     if let Some(text) = msg.text() {
         if text == password {
@@ -69,8 +60,23 @@ async fn is_authorized(msg: &Message, config: &BotConfig, authorized_users: &Aut
             return true;
         }
     }
-    
+
     false
+}
+
+fn is_admin(msg: &Message, config: &BotConfig) -> bool {
+    msg.from()
+        .map(|u| config.admin_user_ids.contains(&u.id))
+        .unwrap_or(false)
+}
+
+fn provider_key_configured(provider: stt::SttProvider, config: &BotConfig) -> bool {
+    match provider {
+        stt::SttProvider::Whisper => config.openai_api_key.is_some(),
+        stt::SttProvider::ElevenLabs => config.elevenlabs_api_key.is_some(),
+        stt::SttProvider::Google => config.google_credentials_json.is_some(),
+        stt::SttProvider::Deepgram => config.deepgram_api_key.is_some(),
+    }
 }
 
 pub async fn command_handler(
@@ -80,6 +86,7 @@ pub async fn command_handler(
     config: BotConfig,
     authorized_users: AuthorizedUsers,
     queue_stats: queue::QueueStats,
+    current_provider: CurrentProvider,
 ) -> ResponseResult<()> {
     if !is_authorized(&msg, &config, &authorized_users).await {
         return Ok(());
@@ -97,16 +104,19 @@ pub async fn command_handler(
                 • Audio files (.mp3, .m4a, .ogg, etc.)\n\
                 • Video files (I'll extract the audio)\n\n\
                 I'll transcribe the speech and send you the text!";
-            
+
             bot.send_message(msg.chat.id, welcome_text).await?;
         }
         Command::Status => {
+            let provider = *current_provider.read().await;
             let status_text = format!(
                 "🤖 Bot Status: ✅ Online\n\
-                🔧 STT Provider: {:?}\n\
+                🔧 STT Provider: {}\n\
+                🧠 Model: {}\n\
                 📊 Memory usage: Low\n\
                 🚀 Ready to transcribe!",
-                config.stt_provider
+                provider.as_str(),
+                provider.model()
             );
 
             bot.send_message(msg.chat.id, status_text).await?;
@@ -117,32 +127,141 @@ pub async fn command_handler(
                 .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                 .await?;
         }
-        Command::Credits => {
-            match &config.elevenlabs_api_key {
-                Some(api_key) => {
-                    match stt::elevenlabs::get_user_credits(api_key).await {
-                        Ok(user_info) => {
-                            let credits_text = format!(
-                                "💳 ElevenLabs Credits\n\
-                                Used: {} characters\n\
-                                Limit: {} characters\n\
-                                Remaining: {} characters",
-                                user_info.subscription.character_count,
-                                user_info.subscription.character_limit,
-                                user_info.subscription.character_limit.saturating_sub(user_info.subscription.character_count)
-                            );
-                            bot.send_message(msg.chat.id, credits_text).await?;
+        Command::Credits(arg) => {
+            let name = arg.trim().to_lowercase();
+            let target = if name.is_empty() {
+                *current_provider.read().await
+            } else {
+                match stt::SttProvider::from_str(&name) {
+                    Some(p) => p,
+                    None => {
+                        bot.send_message(
+                            msg.chat.id,
+                            format!("❌ Unknown provider '{}'. Valid options: deepgram, elevenlabs", name),
+                        ).await?;
+                        return Ok(());
+                    }
+                }
+            };
+
+            match target {
+                stt::SttProvider::ElevenLabs => {
+                    match &config.elevenlabs_api_key {
+                        Some(api_key) => {
+                            match stt::elevenlabs::get_user_credits(api_key).await {
+                                Ok(user_info) => {
+                                    let credits_text = format!(
+                                        "💳 ElevenLabs Credits\n\
+                                        Used: {} characters\n\
+                                        Limit: {} characters\n\
+                                        Remaining: {} characters",
+                                        user_info.subscription.character_count,
+                                        user_info.subscription.character_limit,
+                                        user_info.subscription.character_limit.saturating_sub(user_info.subscription.character_count)
+                                    );
+                                    bot.send_message(msg.chat.id, credits_text).await?;
+                                }
+                                Err(e) => {
+                                    bot.send_message(msg.chat.id, format!("❌ Failed to get credits: {}", e)).await?;
+                                }
+                            }
                         }
-                        Err(e) => {
-                            let error_msg = format!("❌ Failed to get credits: {}", e);
-                            bot.send_message(msg.chat.id, error_msg).await?;
+                        None => {
+                            bot.send_message(msg.chat.id, "❌ ElevenLabs API key not configured").await?;
                         }
                     }
                 }
-                None => {
-                    bot.send_message(msg.chat.id, "❌ ElevenLabs API key not configured").await?;
+                stt::SttProvider::Deepgram => {
+                    match &config.deepgram_api_key {
+                        Some(api_key) => {
+                            match stt::deepgram::get_balance(api_key).await {
+                                Ok(b) => {
+                                    let credits_text = format!(
+                                        "💳 Deepgram Balance\nRemaining: {:.2} {}",
+                                        b.amount,
+                                        b.units.to_uppercase()
+                                    );
+                                    bot.send_message(msg.chat.id, credits_text).await?;
+                                }
+                                Err(e) => {
+                                    bot.send_message(msg.chat.id, format!("❌ Failed to get Deepgram balance: {}", e)).await?;
+                                }
+                            }
+                        }
+                        None => {
+                            bot.send_message(msg.chat.id, "❌ Deepgram API key not configured").await?;
+                        }
+                    }
+                }
+                stt::SttProvider::Whisper | stt::SttProvider::Google => {
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("ℹ️ Credits lookup is not supported for '{}'.", target.as_str()),
+                    ).await?;
                 }
             }
+        }
+        Command::Provider => {
+            let provider = *current_provider.read().await;
+            let key_status = if provider_key_configured(provider, &config) {
+                "✅ API key configured"
+            } else {
+                "⚠️ API key not configured"
+            };
+            let text = format!(
+                "🔧 Current STT provider: {}\n🧠 Model: {}\n{}",
+                provider.as_str(),
+                provider.model(),
+                key_status
+            );
+            bot.send_message(msg.chat.id, text).await?;
+        }
+        Command::SetProvider(name) => {
+            if !is_admin(&msg, &config) {
+                bot.send_message(msg.chat.id, "❌ Not authorized. Only admins can switch providers.").await?;
+                return Ok(());
+            }
+
+            let name = name.trim().to_lowercase();
+            if name.is_empty() {
+                bot.send_message(
+                    msg.chat.id,
+                    "Usage: /setprovider <whisper|elevenlabs|google|deepgram>",
+                ).await?;
+                return Ok(());
+            }
+
+            let new_provider = match stt::SttProvider::from_str(&name) {
+                Some(p) => p,
+                None => {
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("❌ Unknown provider '{}'. Valid options: whisper, elevenlabs, google, deepgram", name),
+                    ).await?;
+                    return Ok(());
+                }
+            };
+
+            if !provider_key_configured(new_provider, &config) {
+                bot.send_message(
+                    msg.chat.id,
+                    format!("❌ Cannot switch to '{}': API key not configured on this bot.", name),
+                ).await?;
+                return Ok(());
+            }
+
+            *current_provider.write().await = new_provider;
+
+            if let Err(e) = persistence::save_runtime_config(new_provider).await {
+                error!("Failed to persist provider switch: {}", e);
+                bot.send_message(msg.chat.id, "⚠️ Provider switched but could not be persisted. It will revert after restart.").await?;
+                return Ok(());
+            }
+
+            bot.send_message(
+                msg.chat.id,
+                format!("✅ STT provider switched to '{}'.", new_provider.as_str()),
+            ).await?;
         }
     }
     Ok(())
@@ -181,7 +300,7 @@ pub async fn audio_handler(
                 .await?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -199,8 +318,8 @@ async fn download_and_queue_audio(
                     (&voice_msg.voice.file, "voice.ogg")
                 }
                 teloxide::types::MediaKind::Audio(audio_msg) => {
-                    info!("Processing audio file: {} ({}s)", 
-                        audio_msg.audio.file_name.as_deref().unwrap_or("unknown"), 
+                    info!("Processing audio file: {} ({}s)",
+                        audio_msg.audio.file_name.as_deref().unwrap_or("unknown"),
                         audio_msg.audio.duration
                     );
                     let filename = audio_msg.audio.file_name.as_deref().unwrap_or("audio.mp3");
@@ -215,7 +334,7 @@ async fn download_and_queue_audio(
                     (&video_note_msg.video_note.file, "video_note.mp4")
                 }
                 teloxide::types::MediaKind::Document(doc_msg) => {
-                    info!("Processing document: {}", 
+                    info!("Processing document: {}",
                         doc_msg.document.file_name.as_deref().unwrap_or("unknown"));
                     let filename = doc_msg.document.file_name.as_deref().unwrap_or("document.bin");
                     (&doc_msg.document.file, filename)
@@ -306,6 +425,6 @@ pub async fn text_handler(bot: Bot, msg: Message, config: BotConfig, authorized_
     if !is_authorized(&msg, &config, &authorized_users).await {
         return Ok(());
     }
-    
+
     Ok(())
 }

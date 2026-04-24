@@ -29,8 +29,11 @@ pub struct ElevenLabsUser {
 }
 
 pub async fn transcribe(audio: &ConvertedAudio, api_key: &str) -> Result<String, SttError> {
-    info!("Starting ElevenLabs transcription for {} bytes of {} audio", 
-        audio.data.len(), audio.format);
+    info!(
+        "Starting transcription provider=elevenlabs model=scribe_v1_experimental bytes={} format={}",
+        audio.data.len(),
+        audio.format
+    );
 
     // ElevenLabs expects PCM 16kHz mono data
     if audio.format != "pcm" {
@@ -70,12 +73,18 @@ pub async fn transcribe(audio: &ConvertedAudio, api_key: &str) -> Result<String,
         
         // Try to parse as JSON first
         if let Ok(stt_response) = serde_json::from_str::<ElevenLabsResponse>(&response_text) {
-            info!("ElevenLabs transcription successful: {} characters", stt_response.text.len());
+            info!(
+                "Transcription complete provider=elevenlabs model=scribe_v1_experimental chars={}",
+                stt_response.text.len()
+            );
             return Ok(stt_response.text.trim().to_string());
         }
-        
+
         // If not JSON, treat as plain text
-        info!("ElevenLabs transcription successful (plain text): {} characters", response_text.len());
+        info!(
+            "Transcription complete provider=elevenlabs model=scribe_v1_experimental chars={} (plain text)",
+            response_text.len()
+        );
         Ok(response_text.trim().to_string())
     } else {
         let error_text = response.text().await?;

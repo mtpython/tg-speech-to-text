@@ -1,4 +1,4 @@
-use crate::{BotConfig, Result, BotError, request_logger, stt::SttProvider};
+use crate::{BotConfig, CurrentProvider, Result, BotError, request_logger, stt::SttProvider};
 use log::{info, error, warn};
 use std::sync::Arc;
 use teloxide::{prelude::*, types::MessageId};
@@ -86,6 +86,7 @@ pub async fn start_queue_processor(
     mut receiver: QueueReceiver,
     config: BotConfig,
     stats: QueueStats,
+    current_provider: CurrentProvider,
 ) {
     info!("Starting queue processor worker");
 
@@ -114,20 +115,33 @@ pub async fn start_queue_processor(
         }
 
         // Process the audio
-        let result = process_audio_item(&item, &config).await;
+        let result = process_audio_item(&item, &config, &current_provider).await;
 
         // Delete the processing message
         item.bot.delete_message(item.chat_id, item.message_id).await.ok();
 
         // Send result
         match result {
-            Ok(transcription) => {
+            Ok((transcription, provider)) => {
                 info!("Successfully processed queue item {}", item.id);
 
+                let via = format!(
+                    "_via {} · {}_",
+                    escape_markdown_v2(provider.as_str()),
+                    escape_markdown_v2(provider.model())
+                );
+
                 let response = if transcription.trim().is_empty() {
-                    "🔇 No speech detected in the audio\\. The audio might be too quiet or contain no spoken words\\.".to_string()
+                    format!(
+                        "{}\n\n🔇 No speech detected in the audio\\. The audio might be too quiet or contain no spoken words\\.",
+                        via
+                    )
                 } else {
-                    format!("📝 *Transcription:*\n\n{}", escape_markdown_v2(&transcription))
+                    format!(
+                        "{}\n\n📝 *Transcription:*\n\n{}",
+                        via,
+                        escape_markdown_v2(&transcription)
+                    )
                 };
 
                 if let Err(e) = send_long_message(&item.bot, item.chat_id, &response, item.reply_to_message_id).await {
@@ -176,11 +190,17 @@ pub async fn start_queue_processor(
     warn!("Queue processor stopped - receiver closed");
 }
 
-async fn process_audio_item(item: &QueueItem, config: &BotConfig) -> Result<String> {
+async fn process_audio_item(
+    item: &QueueItem,
+    config: &BotConfig,
+    current_provider: &CurrentProvider,
+) -> Result<(String, SttProvider)> {
     use crate::{audio, stt};
 
+    let provider = *current_provider.read().await;
+
     // Log transcription request for ElevenLabs
-    if matches!(config.stt_provider, SttProvider::ElevenLabs) {
+    if matches!(provider, SttProvider::ElevenLabs) {
         if let Err(e) = request_logger::log_transcription_request(
             item.user_id,
             item.username.as_deref(),
@@ -191,12 +211,12 @@ async fn process_audio_item(item: &QueueItem, config: &BotConfig) -> Result<Stri
     }
 
     // Convert audio to the format required by the STT provider
-    let converted_audio = audio::convert_for_stt(&item.file_data, &item.original_filename, config.stt_provider).await?;
+    let converted_audio = audio::convert_for_stt(&item.file_data, &item.original_filename, provider).await?;
 
-    // Transcribe using the configured STT provider
-    let transcription = stt::transcribe(&converted_audio, config).await?;
+    // Transcribe using the current provider
+    let transcription = stt::transcribe(&converted_audio, provider, config).await?;
 
-    Ok(transcription)
+    Ok((transcription, provider))
 }
 
 fn escape_markdown_v2(text: &str) -> String {

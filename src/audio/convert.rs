@@ -20,23 +20,23 @@ pub async fn convert_for_stt(
 ) -> Result<ConvertedAudio, AudioError> {
     // Determine input format from filename
     let _input_extension = get_file_extension(original_filename);
-    
-    info!("Converting {} ({} bytes) for {:?} provider", 
+
+    info!("Converting {} ({} bytes) for {:?} provider",
         original_filename, input_data.len(), provider);
 
     // Create temporary input file
     let mut input_temp = NamedTempFile::new()
         .map_err(|e| AudioError::TempFile(format!("Failed to create input temp file: {}", e)))?;
-    
+
     input_temp.write_all(input_data)
         .map_err(|e| AudioError::TempFile(format!("Failed to write input data: {}", e)))?;
-    
+
     let input_path = input_temp.path();
 
     // Determine output format and parameters based on STT provider
     let (output_format, sample_rate, channels, codec) = match provider {
-        SttProvider::ElevenLabs => {
-            // ElevenLabs requires PCM 16kHz mono
+        SttProvider::ElevenLabs | SttProvider::Deepgram => {
+            // Both expect PCM s16le 16kHz mono
             ("pcm", 16000, 1, "pcm_s16le")
         }
         SttProvider::Whisper => {
@@ -52,7 +52,7 @@ pub async fn convert_for_stt(
     // Create temporary output file
     let output_temp = NamedTempFile::new()
         .map_err(|e| AudioError::TempFile(format!("Failed to create output temp file: {}", e)))?;
-    
+
     let output_path = output_temp.path();
 
     // Check if ffmpeg is available
@@ -72,7 +72,7 @@ pub async fn convert_for_stt(
 
     // Add format-specific options
     match provider {
-        SttProvider::ElevenLabs => {
+        SttProvider::ElevenLabs | SttProvider::Deepgram => {
             // For PCM, we need raw format
             cmd.arg("-f").arg("s16le");
         }
@@ -103,7 +103,7 @@ pub async fn convert_for_stt(
     let converted_data = fs::read(output_path)
         .map_err(|e| AudioError::ConversionFailed(format!("Failed to read converted file: {}", e)))?;
 
-    info!("Successfully converted audio: {} bytes -> {} bytes", 
+    info!("Successfully converted audio: {} bytes -> {} bytes",
         input_data.len(), converted_data.len());
 
     Ok(ConvertedAudio {
